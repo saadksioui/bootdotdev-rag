@@ -2,6 +2,19 @@ import argparse
 import json
 import string
 
+def check_common(query: str, title: str) -> bool:
+    table = str.maketrans('', '', string.punctuation)
+    query_tokens = [token for token in query.lower().translate(table).split() if token]
+    title_tokens = [token for token in title.lower().translate(table).split() if token]
+
+    if not query_tokens or not title_tokens:
+        return False
+
+    query_words = set(query_tokens)
+    title_words = set(title_tokens)
+    return any(q_tok in t_tok for q_tok in query_words for t_tok in title_words)
+
+
 def search_movies(query: str) -> None:
     with open("data/movies.json", "r") as file:
         movies = json.load(file)
@@ -10,7 +23,7 @@ def search_movies(query: str) -> None:
         movie["title"] 
         for k in movies.values() 
         for movie in k 
-        if query.lower().translate(table) in movie["title"].lower().translate(table)
+        if check_common(query, movie["title"])
     ]
     if results:
         print(f"Searching for: {query}")
