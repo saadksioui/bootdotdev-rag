@@ -1,11 +1,14 @@
 import argparse
 import json
 import string
+from nltk.stem import PorterStemmer
+
 
 def remove_stopwords(tokens: list[str]) -> list[str]:
+    stemmer = PorterStemmer()
     with open("data/stopwords.txt", "r") as file:
         stopwords = set(file.read().splitlines())
-    return [token for token in tokens if token not in stopwords]
+    return [stemmer.stem(token) for token in tokens if token not in stopwords]
 
 def check_common(query: str, title: str) -> bool:
     table = str.maketrans('', '', string.punctuation)
