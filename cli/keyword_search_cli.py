@@ -1,15 +1,16 @@
 import argparse
 import json
-
+import string
 
 def search_movies(query: str) -> None:
     with open("data/movies.json", "r") as file:
         movies = json.load(file)
+    table = str.maketrans('', '', string.punctuation)
     results = [
         movie["title"] 
         for k in movies.values() 
         for movie in k 
-        if query.lower() in movie["title"].lower()
+        if query.lower().translate(table) in movie["title"].lower().translate(table)
     ]
     if results:
         print(f"Searching for: {query}")
