@@ -2,10 +2,15 @@ import argparse
 import json
 import string
 
+def remove_stopwords(tokens: list[str]) -> list[str]:
+    with open("data/stopwords.txt", "r") as file:
+        stopwords = set(file.read().splitlines())
+    return [token for token in tokens if token not in stopwords]
+
 def check_common(query: str, title: str) -> bool:
     table = str.maketrans('', '', string.punctuation)
-    query_tokens = [token for token in query.lower().translate(table).split() if token]
-    title_tokens = [token for token in title.lower().translate(table).split() if token]
+    query_tokens = remove_stopwords([token for token in query.lower().translate(table).split() if token])
+    title_tokens = remove_stopwords([token for token in title.lower().translate(table).split() if token])
 
     if not query_tokens or not title_tokens:
         return False
