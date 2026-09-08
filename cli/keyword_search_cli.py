@@ -139,10 +139,14 @@ def main() -> None:
     subparsers.add_parser("build", help="Build the inverted index and store in the disk")
     term_freq = subparsers.add_parser("tf", help="Build the inverted index and store in the disk")
     inv_doc_freq = subparsers.add_parser("idf", help="get the freq of a word that are specific to a given dataset")
+    search_parser = subparsers.add_parser("search", help="Search movies using keywords")
+    tfidf = subparsers.add_parser("tfidf", help="Calculate teh TF-IDF score")
+
     inv_doc_freq.add_argument("term", type=str, help="Term")
     term_freq.add_argument("doc_id", type=int, help="Document ID")
     term_freq.add_argument("term", type=str, help="Term")
-    search_parser = subparsers.add_parser("search", help="Search movies using keywords")
+    tfidf.add_argument("doc_id", type=int, help="Document ID")
+    tfidf.add_argument("term", type=str, help="Term")
     search_parser.add_argument("query", type=str, help="Search query")
 
     args = parser.parse_args()
@@ -167,6 +171,19 @@ def main() -> None:
                 term_match_doc_count += len(inverted.get_documents(token)) 
             idf = math.log((total_doc_count + 1) / (term_match_doc_count + 1))
             print(f"Inverse document frequency of '{args.term}': {idf:.2f}")
+        case "tfidf":
+            if inverted.load() is None:
+                print("Files don't exist. Run build first.")
+                return
+            tokens = inverted._tokenizer(args.term)
+            total_doc_count = len(inverted.docmap)
+            term_match_doc_count = 0
+            for token in tokens:
+                term_match_doc_count += len(inverted.get_documents(token)) 
+            tf = inverted.get_tf(args.doc_id, args.term)
+            idf = math.log((total_doc_count + 1) / (term_match_doc_count + 1))
+            tf_idf = tf * idf
+            print(f"TF-IDF score of '{args.term}' in document '{args.doc_id}': {tf_idf:.2f}")
         case _:
             parser.print_help()
 
