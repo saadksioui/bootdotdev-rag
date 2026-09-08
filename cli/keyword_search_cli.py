@@ -1,6 +1,18 @@
 import json
 import argparse
 import string
+from nltk.stem import PorterStemmer
+
+
+def stemming(tokens):
+    stemmer = PorterStemmer()
+    return [stemmer.stem(token) for token in tokens]
+
+
+def stop_words():
+    with open("data/stopwords.txt", 'r') as file:
+        stopwords = file.read().splitlines()
+    return list(filter(lambda x: clean_punctuation(x), stopwords))
 
 
 def check_common(list1, list2):
@@ -18,6 +30,13 @@ def clean_punctuation(input_string):
     return cleaned_string
 
 
+def clean_punctuation_stopwords(string):
+    clean = clean_punctuation(string).split()
+    stop = stop_words()
+    tokens = list(filter(lambda x: x not in stop, clean))
+    return stemming(tokens)
+
+
 def load_file(file_path):
     with open(file_path, 'r') as file:
         movies = json.load(file)["movies"]
@@ -26,10 +45,10 @@ def load_file(file_path):
 
 def search_movies(query):
     movies = load_file("data/movies.json")
-    search_cleaned = clean_punctuation(query).split()
+    search_cleaned = clean_punctuation_stopwords(query)
     found_movies = []
     for movie in movies:
-        title_cleaned = clean_punctuation(movie['title']).split()
+        title_cleaned = clean_punctuation_stopwords(movie['title'])
         if check_common(search_cleaned, title_cleaned):
             found_movies.append(movie)
     for i, movie in enumerate(found_movies, start=1):
