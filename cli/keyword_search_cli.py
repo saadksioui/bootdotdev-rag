@@ -1,8 +1,49 @@
 import json
 import argparse
 import string
+import pickle
+import os
 from nltk.stem import PorterStemmer
 
+class InvertedIndex:
+    def __init__(self):
+        self.index = {}
+        self.docmap = {}
+
+    def __add_document(self, doc_id, text):
+        tokens = clean_punctuation_stopwords(text)
+        self.docmap[doc_id] = text
+
+        for token in tokens:
+            if token not in self.index:
+                self.index[token] = []
+            self.index[token].append(doc_id)
+
+
+    def get_documents(self, term):
+        doc_ids = self.index.get(term, [])
+        return sorted(doc_ids)
+
+    def build(self):
+        movies = load_file("data/movies.json")
+        for m in movies:
+            self.__add_document(m['id'], f"{m['title']} {m['description']}")
+
+    def save(self):
+        if not os.path.exists("cache"):
+            os.mkdir("cache")
+        with open("cache/index.pkl", "wb") as f:
+            pickle.dump(self.index, f)
+        with open("cache/docmap.pkl", "wb") as f:
+            pickle.dump(self.docmap, f)
+
+
+def build_command():
+    index = InvertedIndex()
+    index.build()
+    index.save()
+    docs = index.get_documents('merida')
+    print(f"First document for token 'merida' = {docs[0]}")
 
 def stemming(tokens):
     stemmer = PorterStemmer()
@@ -59,6 +100,7 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     search_parser = subparsers.add_parser("search", help="Search movies using keywords")
+    build_parser = subparsers.add_parser("build", help="Build the inverted index and store in the disk")
     search_parser.add_argument("query", type=str, help="Search query")
 
     args = parser.parse_args()
@@ -66,6 +108,8 @@ def main() -> None:
         case "search":
             print(f"Searching for: {args.query}")
             search_movies(args.query)
+        case "build":
+            build_command()
         case _:
             parser.print_help()
 
