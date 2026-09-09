@@ -8,6 +8,7 @@ from collections import Counter
 from nltk.stem import PorterStemmer
 
 BM25_K1 = 1.5
+BM25_B = 0.75
 
 def build_command(inverted):
     inverted.build()
@@ -80,7 +81,7 @@ def bm25_idf_command(term, inverted):
     return inverted.get_bm25_idf(tokens[0])
 
 
-def bm25_tf_command(doc_id, term, inverted, k1=BM25_K1):
+def bm25_tf_command(doc_id, term, inverted, k1=BM25_K1, b=BM25_B):
     if inverted.load() is None:
         print("Files don't exist. Run build first.")
         return
@@ -95,11 +96,14 @@ class InvertedIndex:
         self.index = {}
         self.docmap = {}
         self.term_frequencies = {}
+        self.doc_lengths = {}
+        self.doc_lengths_path = os.path.join("cache/", "doc_lengths.pkl")
 
     def __add_document(self, doc_id, text):
         tokens = clean_punctuation_stopwords(text)
 
         self.term_frequencies[doc_id] = Counter(tokens)
+        self.doc_lengths[doc_id] = len(tokens)
         for token in set(tokens):
             if token not in self.index:
                 self.index[token] = []
@@ -109,6 +113,10 @@ class InvertedIndex:
         tokens = clean_punctuation_stopwords(term)
         return tokens
 
+    def __get_avg_doc_length(self) -> float:
+        total_length = sum([v for v in self.doc_lengths.values()])
+        return (total_length + 1) / (len(self.doc_lengths))
+ 
     def get_documents(self, term):
         doc_ids = self.index.get(term, [])
         return sorted(doc_ids)
@@ -138,6 +146,8 @@ class InvertedIndex:
             pickle.dump(self.docmap, f)
         with open("cache/term_frequencies.pkl", "wb") as f:
             pickle.dump(self.term_frequencies, f)
+        with open("cache/doc_lengths.pkl", "wb") as f:
+            pickle.dump(self.doc_lengths, f)
 
     def load(self):
         try:
@@ -149,6 +159,8 @@ class InvertedIndex:
 
             with open("cache/term_frequencies.pkl", "rb") as file:
                 self.term_frequencies = pickle.load(file)
+            with open("cache/doc_lengths.pkl", "rb") as file:
+                self.doc_lengths = pickle.load(file)
             return True
         except FileNotFoundError:
             return None
@@ -158,9 +170,12 @@ class InvertedIndex:
         term_match_doc_count = len(self.get_documents(term))
         return math.log((total_doc_count - term_match_doc_count + 0.5) / (term_match_doc_count + 0.5) + 1)
 
-    def get_bm25_tf(self, doc_id, term, k1=BM25_K1):
+    def get_bm25_tf(self, doc_id, term, k1=BM25_K1, b=BM25_B):
+        avg_doc_length = self.__get_avg_doc_length()
+        doc_length = self.doc_lengths[doc_id]
+        length_norm = 1 - b + b * (doc_length / avg_doc_length)
         basic_tf = self.get_tf(doc_id, term)
-        bm25_tf = (basic_tf * (k1 + 1)) / (basic_tf + k1)
+        bm25_tf = (basic_tf * (k1 + 1)) / (basic_tf + k1 * length_norm)
         return bm25_tf
 
 
@@ -182,6 +197,9 @@ def main() -> None:
     bm25_tf_parser.add_argument("term", type=str, help="Term to get BM25 TF score for")
     bm25_tf_parser.add_argument(
         "k1", type=float, nargs="?", default=BM25_K1, help="Tunable BM25 K1 parameter"
+    )
+    bm25_tf_parser.add_argument(
+        "b", type=float, nargs="?", default=BM25_B, help="Tunable BM25 b parameter"
     )
     bm25_idf_parser.add_argument("term", type=str, help="Term to get BM25 IDF score for")
     inv_doc_freq.add_argument("term", type=str, help="Term")
@@ -230,7 +248,7 @@ def main() -> None:
             bm25idf = bm25_idf_command(args.term, inverted)
             print(f"BM25 IDF score of '{args.term}': {bm25idf:.2f}")
         case "bm25tf":
-            bm25tf = bm25_tf_command(args.doc_id, args.term, inverted, args.k1)
+            bm25tf = bm25_tf_command(args.doc_id, args.term, inverted, args.k1, args.b)
             print(f"BM25 TF score of '{args.term}' in document '{args.doc_id}': {bm25tf:.2f}")
         case _:
             parser.print_help()
