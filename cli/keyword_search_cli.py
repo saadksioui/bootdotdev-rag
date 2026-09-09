@@ -2,8 +2,93 @@ import argparse
 import pickle
 import os
 import math
+import json
+import string
 from collections import Counter
-from cli.utils import clean_punctuation_stopwords, load_file, search_movies, build_command
+from nltk.stem import PorterStemmer
+
+BM25_K1 = 1.5
+
+def build_command(inverted):
+    inverted.build()
+    inverted.save()
+
+def stemming(tokens):
+    stemmer = PorterStemmer()
+    return [stemmer.stem(token) for token in tokens]
+
+
+def stop_words():
+    with open("data/stopwords.txt", 'r') as file:
+        stopwords = file.read().splitlines()
+    return list(filter(lambda x: clean_punctuation(x), stopwords))
+
+
+def check_common(list1, list2):
+    if not list1 or not list2:
+        return False
+
+    query_words = set(list1)
+    title_words = set(list2)
+    return any(q_tok in t_tok for q_tok in query_words for t_tok in title_words)
+
+
+def clean_punctuation(input_string):
+    translator = str.maketrans('', '', string.punctuation)
+    cleaned_string = input_string.translate(translator).lower()
+    return cleaned_string
+
+
+def clean_punctuation_stopwords(string):
+    clean = clean_punctuation(string).split()
+    stop = stop_words()
+    tokens = list(filter(lambda x: x not in stop, clean))
+    return stemming(tokens)
+
+
+def load_file(file_path):
+    with open(file_path, 'r') as file:
+        movies = json.load(file)["movies"]
+    return movies
+
+
+def search_movies(query, inverted):
+    if inverted.load() is None:
+        print("Files don't exist. Run build first.")
+        return
+    tokens = clean_punctuation_stopwords(query)
+    found_movies = []
+    limit = 5
+    for token in tokens:
+        if token in inverted.index:
+            for doc_id in inverted.index[token]:
+                found_movies.append(doc_id)
+                if len(found_movies) >= limit:
+                    break
+        if len(found_movies) >= limit:
+            break
+    for doc_id in found_movies:
+        movie = inverted.docmap[doc_id]
+        print(f"{movie['title']} ({doc_id})")
+
+
+def bm25_idf_command(term, inverted):
+    if inverted.load() is None:
+        print("Files don't exist. Run build first.")
+        return
+    tokens = inverted._tokenizer(term)
+    return inverted.get_bm25_idf(tokens[0])
+
+
+def bm25_tf_command(doc_id, term, inverted, k1=BM25_K1):
+    if inverted.load() is None:
+        print("Files don't exist. Run build first.")
+        return
+
+    tokens = inverted._tokenizer(term)
+    return inverted.get_bm25_tf(doc_id, tokens[0], k1)
+
+
 
 class InvertedIndex:
     def __init__(self):
@@ -69,8 +154,14 @@ class InvertedIndex:
             return None
 
     def get_bm25_idf(self, term: str) -> float:
-        pass
+        total_doc_count = len(self.docmap)
+        term_match_doc_count = len(self.get_documents(term))
+        return math.log((total_doc_count - term_match_doc_count + 0.5) / (term_match_doc_count + 0.5) + 1)
 
+    def get_bm25_tf(self, doc_id, term, k1=BM25_K1):
+        basic_tf = self.get_tf(doc_id, term)
+        bm25_tf = (basic_tf * (k1 + 1)) / (basic_tf + k1)
+        return bm25_tf
 
 
 def main() -> None:
@@ -82,7 +173,17 @@ def main() -> None:
     inv_doc_freq = subparsers.add_parser("idf", help="get the freq of a word that are specific to a given dataset")
     search_parser = subparsers.add_parser("search", help="Search movies using keywords")
     tfidf = subparsers.add_parser("tfidf", help="Calculate teh TF-IDF score")
+    bm25_idf_parser = subparsers.add_parser("bm25idf", help="Get BM25 IDF score for a given term")
+    bm25_tf_parser = subparsers.add_parser(
+        "bm25tf", help="Get BM25 TF score for a given document ID and term"
+    )
 
+    bm25_tf_parser.add_argument("doc_id", type=int, help="Document ID")
+    bm25_tf_parser.add_argument("term", type=str, help="Term to get BM25 TF score for")
+    bm25_tf_parser.add_argument(
+        "k1", type=float, nargs="?", default=BM25_K1, help="Tunable BM25 K1 parameter"
+    )
+    bm25_idf_parser.add_argument("term", type=str, help="Term to get BM25 IDF score for")
     inv_doc_freq.add_argument("term", type=str, help="Term")
     term_freq.add_argument("doc_id", type=int, help="Document ID")
     term_freq.add_argument("term", type=str, help="Term")
@@ -125,6 +226,12 @@ def main() -> None:
             idf = math.log((total_doc_count + 1) / (term_match_doc_count + 1))
             tf_idf = tf * idf
             print(f"TF-IDF score of '{args.term}' in document '{args.doc_id}': {tf_idf:.2f}")
+        case "bm25idf":
+            bm25idf = bm25_idf_command(args.term, inverted)
+            print(f"BM25 IDF score of '{args.term}': {bm25idf:.2f}")
+        case "bm25tf":
+            bm25tf = bm25_tf_command(args.doc_id, args.term, inverted, args.k1)
+            print(f"BM25 TF score of '{args.term}' in document '{args.doc_id}': {bm25tf:.2f}")
         case _:
             parser.print_help()
 
