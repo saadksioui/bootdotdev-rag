@@ -159,6 +159,7 @@ class InvertedIndex:
 
             with open("cache/term_frequencies.pkl", "rb") as file:
                 self.term_frequencies = pickle.load(file)
+
             with open("cache/doc_lengths.pkl", "rb") as file:
                 self.doc_lengths = pickle.load(file)
             return True
@@ -178,6 +179,26 @@ class InvertedIndex:
         bm25_tf = (basic_tf * (k1 + 1)) / (basic_tf + k1 * length_norm)
         return bm25_tf
 
+    def bm25(self, doc_id, term):
+        tokens = self._tokenizer(term)
+        if not tokens:
+            return 0.0
+        token = tokens[0]
+        bm25_tf = self.get_bm25_tf(doc_id, token)
+        bm25_idf = self.get_bm25_idf(token)
+        return bm25_tf * bm25_idf
+
+    def bm25_search(self, query, limit):
+        tokens = self._tokenizer(query)
+        scores = {}
+        for token in tokens:
+            matched_docs = self.get_documents(token)
+            for doc_id in matched_docs:
+                bm25 = self.bm25(doc_id, token)
+                scores[doc_id] = scores.get(doc_id, 0.0) + bm25
+        sorted_scores = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+        return sorted_scores[:limit] 
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Keyword Search CLI")
@@ -192,7 +213,11 @@ def main() -> None:
     bm25_tf_parser = subparsers.add_parser(
         "bm25tf", help="Get BM25 TF score for a given document ID and term"
     )
+    bm25search_parser = subparsers.add_parser(
+        "bm25search", help="Search movies using full BM25 scoring"
+    )
 
+    bm25search_parser.add_argument("query", type=str, help="Search query")
     bm25_tf_parser.add_argument("doc_id", type=int, help="Document ID")
     bm25_tf_parser.add_argument("term", type=str, help="Term to get BM25 TF score for")
     bm25_tf_parser.add_argument(
@@ -250,6 +275,9 @@ def main() -> None:
         case "bm25tf":
             bm25tf = bm25_tf_command(args.doc_id, args.term, inverted, args.k1, args.b)
             print(f"BM25 TF score of '{args.term}' in document '{args.doc_id}': {bm25tf:.2f}")
+        case "bm25search":
+            scores = inverted.bm25_search(args.query, 5)
+            print(scores)
         case _:
             parser.print_help()
 
