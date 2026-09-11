@@ -21,8 +21,11 @@ def stemming(tokens):
 
 def stop_words():
     with open("data/stopwords.txt", 'r') as file:
-        stopwords = file.read().splitlines()
-    return list(filter(lambda x: clean_punctuation(x), stopwords))
+        return {
+            clean_punctuation(line)
+            for line in file.read().splitlines()
+            if clean_punctuation(line)
+        }
 
 
 def check_common(list1, list2):
@@ -43,7 +46,7 @@ def clean_punctuation(input_string):
 def clean_punctuation_stopwords(string):
     clean = clean_punctuation(string).split()
     stop = stop_words()
-    tokens = list(filter(lambda x: x not in stop, clean))
+    tokens = [token for token in clean if token not in stop]
     return stemming(tokens)
 
 
@@ -114,8 +117,8 @@ class InvertedIndex:
         return tokens
 
     def __get_avg_doc_length(self) -> float:
-        total_length = sum([v for v in self.doc_lengths.values()])
-        return (total_length + 1) / (len(self.doc_lengths))
+        total_length = sum(self.doc_lengths.values())
+        return total_length / len(self.doc_lengths)
  
     def get_documents(self, term):
         doc_ids = self.index.get(term, [])
@@ -180,24 +183,29 @@ class InvertedIndex:
         return bm25_tf
 
     def bm25(self, doc_id, term):
-        tokens = self._tokenizer(term)
-        if not tokens:
-            return 0.0
-        token = tokens[0]
-        bm25_tf = self.get_bm25_tf(doc_id, token)
-        bm25_idf = self.get_bm25_idf(token)
+        bm25_tf = self.get_bm25_tf(doc_id, term)
+        bm25_idf = self.get_bm25_idf(term)
         return bm25_tf * bm25_idf
 
     def bm25_search(self, query, limit):
         tokens = self._tokenizer(query)
         scores = {}
-        for token in tokens:
-            matched_docs = self.get_documents(token)
-            for doc_id in matched_docs:
-                bm25 = self.bm25(doc_id, token)
-                scores[doc_id] = scores.get(doc_id, 0.0) + bm25
-        sorted_scores = sorted(scores.items(), key=lambda item: item[1], reverse=True)
-        return sorted_scores[:limit] 
+
+        for doc_id in self.docmap:
+            total_score = 0.0
+
+            for token in tokens:
+                total_score += self.bm25(doc_id, token)
+
+            scores[doc_id] = total_score
+
+        sorted_scores = sorted(
+            scores.items(),
+            key=lambda item: item[1],
+            reverse=True
+        )
+
+        return sorted_scores[:limit]
 
 
 def main() -> None:
@@ -276,8 +284,12 @@ def main() -> None:
             bm25tf = bm25_tf_command(args.doc_id, args.term, inverted, args.k1, args.b)
             print(f"BM25 TF score of '{args.term}' in document '{args.doc_id}': {bm25tf:.2f}")
         case "bm25search":
+            if inverted.load() is None:
+                print("Files don't exist. Run build first.")
+                return
             scores = inverted.bm25_search(args.query, 5)
-            print(scores)
+            for index, score in enumerate(scores, start=1):
+                print(f"{index}: ({score[0]}) {inverted.docmap[score[0]]['title']} - Score: {score[1]:.2f}")
         case _:
             parser.print_help()
 
