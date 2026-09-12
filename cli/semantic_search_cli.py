@@ -29,6 +29,9 @@ def main() -> None:
     chunk_parser.add_argument(
         "--chunk-size", type=int, default=200, help="The number of each chunk"
     )
+    chunk_parser.add_argument(
+        "--overlap", type=int, help="The number of each chunk"
+    )
     search_parser.add_argument(
         "query", type=str, help="The query to use for search the movies"
     )
@@ -52,7 +55,12 @@ def main() -> None:
             search_query(args.query, args.limit)
         case "chunk":
             words = args.text.split()
-            chunks = [" ".join(words[i:i + args.chunk_size]) for i in range(0, len(words), args.chunk_size)]
+            chunks = []
+            for i in range(0, len(words), args.chunk_size):
+                if i - args.overlap > 0:
+                    chunks.append(" ".join(words[i-args.overlap:i + args.chunk_size]))
+                else:
+                    chunks.append(" ".join(words[i:i + args.chunk_size]))
             print(f"Chunking {len(args.text)} characters")
             for index, chunk in enumerate(chunks, start=1):
                 print(f"{index}. {chunk}")
