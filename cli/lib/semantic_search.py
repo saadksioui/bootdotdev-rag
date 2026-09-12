@@ -67,3 +67,6 @@ def verify_embeddings():
     print(
         f"Embeddings shape: {embeddings.shape[0]} vectors in {embeddings.shape[1]} dimensions"
     )
+
+def embed_query_text(query):
+    embed_text(query)
