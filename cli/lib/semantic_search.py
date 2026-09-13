@@ -206,8 +206,12 @@ def search_query(query, limit):
 
 
 def semantic_chunk(text, chunk_size, overlap):
+    text = text.strip()
+    if not text:
+        return []
     sentences = re.split(r"(?<=[.!?])\s+", text)
     sentences = [s.strip() for s in sentences if s.strip()]
+
     
     chunks = []
     if not sentences:
