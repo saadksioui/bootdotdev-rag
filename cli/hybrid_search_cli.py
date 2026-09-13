@@ -1,9 +1,10 @@
-import argparse
 from lib.hybrid_search import HybridSearch, normilaze
 from lib.keyword_search import load_file
-import os
+from lib.llm_queries import spell, rewrite, expand
 from dotenv import load_dotenv
 from openai import OpenAI
+import argparse
+import os
 
 
 load_dotenv()
@@ -54,7 +55,7 @@ def main() -> None:
     rrf_parser.add_argument(
         "--enhance",
         type=str,
-        choices=["spell"],
+        choices=["spell", "rewrite", "expand"],
         help="Query enhancement method",
     )
     weighted_parser.add_argument(
@@ -100,18 +101,35 @@ def main() -> None:
                 messages = [
                     {
                         "role": "user",
-                        "content": f"""Fix any spelling errors in the user-provided movie search query below.
-                                    Correct only clear, high-confidence typos. Do not rewrite, add, remove, or reorder words.
-                                    Preserve punctuation and capitalization unless a change is required for a typo fix.
-                                    If there are no spelling errors, or if you're unsure, output the original query unchanged.
-                                    Output only the final query text, nothing else.
-                                    User query: "{args.query}"
-                                    """,
+                        "content": spell(args.query),
                     }
                 ]
                 response = client.chat.completions.create(model="openrouter/free", messages=messages)
                 args.query = response.choices[0].message.content
                 print(f"Enhanced query ({args.enhance}): '{old_query}' -> '{args.query}'\n")
+            elif args.enhance == "rewrite":
+                old_query = args.query
+                messages = [
+                    {
+                        "role": "user",
+                        "content": rewrite(args.query),
+                    }
+                ]
+                response = client.chat.completions.create(model="openrouter/free", messages=messages)
+                args.query = response.choices[0].message.content
+                print(f"Enhanced query ({args.enhance}): '{old_query}' -> '{args.query}'\n")
+            elif args.enhance == "expand":
+                old_query = args.query
+                messages = [
+                    {
+                        "role": "user",
+                        "content": expand(args.query),
+                    }
+                ]
+                response = client.chat.completions.create(model="openrouter/free", messages=messages)
+                args.query = response.choices[0].message.content
+                print(f"Enhanced query ({args.enhance}): '{old_query}' -> '{args.query}'\n")
+
             results = hybrid_search.rrf_search(args.query, args.k, args.limit)
             for id, item in enumerate(results, start=1):
                 title = hybrid_search.semantic_search.document_map[item[0]]['title']
