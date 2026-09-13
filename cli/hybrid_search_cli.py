@@ -1,6 +1,7 @@
 from lib.hybrid_search import HybridSearch, normilaze
 from lib.keyword_search import load_file
 from lib.llm_queries import spell, rewrite, expand, individual
+from sentence_transformers import CrossEncoder
 from dotenv import load_dotenv
 from openai import OpenAI
 import json
@@ -63,7 +64,7 @@ def main() -> None:
     rrf_parser.add_argument(
         "--rerank-method",
         type=str,
-        choices=["individual", "batch"],
+        choices=["individual", "batch", "cross_encoder"],
         help="Re-Ranking method",
     )
     weighted_parser.add_argument(
@@ -202,6 +203,39 @@ def main() -> None:
                     description = doc.get('description', '')
                     print(f"{id}. {title}")
                     print(f"   Re-rank Rank: {item[1].get('llm_rank', 0)}")
+                    print(f"   RRF Score: {item[1].get('rrf_score', 0.0):.3f}")
+                    print(f"   BM25 Rank: {item[1].get('bm25_rank', 0.0):.3f}, Semantic Rank: {item[1].get('semantic_rank', 0.0):.3f}")
+                    print(f"   {description}\n")
+
+            elif args.rerank_method == "cross_encoder":
+                pairs = []
+                for item in results:
+                    doc = hybrid_search.semantic_search.document_map[item[0]]
+                    document_text = doc.get('document', doc.get('description', ''))
+                    pairs.append([args.query, f"{doc.get('title', '')} - {document_text}"])
+
+                try:
+                    cross_encoder = CrossEncoder("cross-encoder/ms-marco-TinyBERT-L2-v2")
+                except Exception as exc:
+                    if "gpu" in str(exc).lower() or "cuda" in str(exc).lower() or "hardware" in str(exc).lower():
+                        cross_encoder = CrossEncoder("cross-encoder/ms-marco-TinyBERT-L2-v2", device="cpu")
+                    else:
+                        raise
+
+                scores = cross_encoder.predict(pairs)
+                for item, score in zip(results, scores):
+                    item[1]['cross_encoder_score'] = float(score)
+
+                results = sorted(results, key=lambda item: item[1].get('cross_encoder_score', float('-inf')), reverse=True)
+
+                print(f"Re-ranking top {args.limit} results using cross_encoder method...")
+                print(f"Reciprocal Rank Fusion Results for '{args.query}' (k={args.k}):\n")
+                for id, item in enumerate(results[: args.limit], start=1):
+                    doc = hybrid_search.semantic_search.document_map[item[0]]
+                    title = doc.get('title', '')
+                    description = doc.get('description', '')
+                    print(f"{id}. {title}")
+                    print(f"   Cross Encoder Score: {item[1].get('cross_encoder_score', 0.0):.3f}")
                     print(f"   RRF Score: {item[1].get('rrf_score', 0.0):.3f}")
                     print(f"   BM25 Rank: {item[1].get('bm25_rank', 0.0):.3f}, Semantic Rank: {item[1].get('semantic_rank', 0.0):.3f}")
                     print(f"   {description}\n")
