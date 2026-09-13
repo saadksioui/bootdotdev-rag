@@ -1,6 +1,20 @@
 import argparse
 from lib.hybrid_search import HybridSearch, normilaze
 from lib.keyword_search import load_file
+import os
+from dotenv import load_dotenv
+from openai import OpenAI
+
+
+load_dotenv()
+api_key = os.environ.get("OPENROUTER_API_KEY")
+if not api_key:
+    raise RuntimeError("OPENROUTER_API_KEY environment variable not set")
+
+client = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=api_key,
+)
 
 
 def main() -> None:
@@ -36,6 +50,12 @@ def main() -> None:
         type=int, 
         default=5,
         help="The limit of search result (Default: 0.5)"
+    )
+    rrf_parser.add_argument(
+        "--enhance",
+        type=str,
+        choices=["spell"],
+        help="Query enhancement method",
     )
     weighted_parser.add_argument(
         "query", 
@@ -75,6 +95,23 @@ def main() -> None:
                 print(f"BM25: {item[1].get('bm25_score', 0.0):.3f}, Semantic: {item[1].get('semantic_score', 0.0):.3f}")
                 print(description)
         case 'rrf-search':
+            if args.enhance == "spell":
+                old_query = args.query
+                messages = [
+                    {
+                        "role": "user",
+                        "content": f"""Fix any spelling errors in the user-provided movie search query below.
+                                    Correct only clear, high-confidence typos. Do not rewrite, add, remove, or reorder words.
+                                    Preserve punctuation and capitalization unless a change is required for a typo fix.
+                                    If there are no spelling errors, or if you're unsure, output the original query unchanged.
+                                    Output only the final query text, nothing else.
+                                    User query: "{args.query}"
+                                    """,
+                    }
+                ]
+                response = client.chat.completions.create(model="openrouter/free", messages=messages)
+                args.query = response.choices[0].message.content
+                print(f"Enhanced query ({args.enhance}): '{old_query}' -> '{args.query}'\n")
             results = hybrid_search.rrf_search(args.query, args.k, args.limit)
             for id, item in enumerate(results, start=1):
                 title = hybrid_search.semantic_search.document_map[item[0]]['title']
