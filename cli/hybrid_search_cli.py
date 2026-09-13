@@ -3,6 +3,7 @@ from lib.keyword_search import load_file
 from lib.llm_queries import spell, rewrite, expand, individual
 from dotenv import load_dotenv
 from openai import OpenAI
+import json
 import argparse
 import os
 import time
@@ -62,7 +63,7 @@ def main() -> None:
     rrf_parser.add_argument(
         "--rerank-method",
         type=str,
-        choices=["individual"],
+        choices=["individual", "batch"],
         help="Re-Ranking method",
     )
     weighted_parser.add_argument(
@@ -136,9 +137,14 @@ def main() -> None:
                 response = client.chat.completions.create(model="openrouter/free", messages=messages)
                 args.query = response.choices[0].message.content
                 print(f"Enhanced query ({args.enhance}): '{old_query}' -> '{args.query}'\n")
+            if args.rerank_method:
+                search_limit = args.limit * 5
+            else:
+                search_limit = args.limit
+
+            results = hybrid_search.rrf_search(args.query, args.k, search_limit)
+
             if args.rerank_method == "individual":
-                limit = args.limit * 5
-                results = hybrid_search.rrf_search(args.query, args.k, limit)
                 for item in results:
                     doc = hybrid_search.semantic_search.document_map[item[0]]
                     messages = [
@@ -150,7 +156,7 @@ def main() -> None:
                     response = client.chat.completions.create(model="openrouter/free", messages=messages)
                     score = response.choices[0].message.content
                     item[1]['rank_score'] = int(score) if score.isdigit() else 0
-                results = sorted(results, key=lambda item:item[1]['rank_score'], reverse=True)
+                results = sorted(results, key=lambda item: item[1].get('rank_score', 0), reverse=True)
                 for id, item in enumerate(results, start=1):
                     title = hybrid_search.semantic_search.document_map[item[0]]['title']
                     description = hybrid_search.semantic_search.document_map[item[0]]['description']
@@ -159,8 +165,48 @@ def main() -> None:
                     print(f"RRF Score: {item[1].get('rrf_score', 0.0):.3f}")
                     print(f"BM25: {item[1].get('bm25_rank', 0.0):.3f}, Semantic: {item[1].get('semantic_rank', 0.0):.3f}")
                     print(description)
+
+            elif args.rerank_method == "batch":
+                doc_lines = []
+                for item in results:
+                    doc = hybrid_search.semantic_search.document_map[item[0]]
+                    doc_id = item[0]
+                    title = doc.get('title', '')
+                    desc = doc.get('description', '')
+                    doc_lines.append(f"{doc_id}: {title}\n{desc}")
+                doc_list_str = "\n\n".join(doc_lines)
+
+                prompt = f"""Rank the movies listed below by relevance to the following search query.\n\nQuery: \"{args.query}\"\n\nMovies:\n{doc_list_str}\n\nReturn the movie IDs in order of relevance, best match first.\n\nYour response must be a raw JSON array of integers.\nDo not wrap the JSON in Markdown. Do not use a ```json code block.\nDo not include any explanatory text.\n\nFor example:\n[75, 12, 34, 2, 1]\n\nRanking:"""
+
+                messages = [{"role": "user", "content": prompt}]
+                response = client.chat.completions.create(model="openrouter/free", messages=messages)
+                content = response.choices[0].message.content.strip()
+                try:
+                    ranked_ids = json.loads(content)
+                except Exception:
+                    ranked_ids = []
+
+                rank_map = {int(doc_id): idx + 1 for idx, doc_id in enumerate(ranked_ids) if isinstance(doc_id, int) or (isinstance(doc_id, str) and doc_id.isdigit())}
+                default_rank = len(results) + 1
+                for item in results:
+                    doc_id = int(item[0])
+                    item[1]['llm_rank'] = rank_map.get(doc_id, default_rank)
+
+                results = sorted(results, key=lambda item: item[1].get('llm_rank', default_rank))
+
+                print(f"Re-ranking top {args.limit} results using batch method...")
+                print(f"Reciprocal Rank Fusion Results for '{args.query}' (k={args.k}):\n")
+                for id, item in enumerate(results[: args.limit], start=1):
+                    doc = hybrid_search.semantic_search.document_map[item[0]]
+                    title = doc.get('title', '')
+                    description = doc.get('description', '')
+                    print(f"{id}. {title}")
+                    print(f"   Re-rank Rank: {item[1].get('llm_rank', 0)}")
+                    print(f"   RRF Score: {item[1].get('rrf_score', 0.0):.3f}")
+                    print(f"   BM25 Rank: {item[1].get('bm25_rank', 0.0):.3f}, Semantic Rank: {item[1].get('semantic_rank', 0.0):.3f}")
+                    print(f"   {description}\n")
+
             else:
-                results = hybrid_search.rrf_search(args.query, args.k, args.limit)
                 for id, item in enumerate(results, start=1):
                     title = hybrid_search.semantic_search.document_map[item[0]]['title']
                     description = hybrid_search.semantic_search.document_map[item[0]]['description']
