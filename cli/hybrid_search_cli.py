@@ -1,10 +1,11 @@
 from lib.hybrid_search import HybridSearch, normilaze
 from lib.keyword_search import load_file
-from lib.llm_queries import spell, rewrite, expand
+from lib.llm_queries import spell, rewrite, expand, individual
 from dotenv import load_dotenv
 from openai import OpenAI
 import argparse
 import os
+import time
 
 
 load_dotenv()
@@ -57,6 +58,12 @@ def main() -> None:
         type=str,
         choices=["spell", "rewrite", "expand"],
         help="Query enhancement method",
+    )
+    rrf_parser.add_argument(
+        "--rerank-method",
+        type=str,
+        choices=["individual"],
+        help="Re-Ranking method",
     )
     weighted_parser.add_argument(
         "query", 
@@ -129,15 +136,38 @@ def main() -> None:
                 response = client.chat.completions.create(model="openrouter/free", messages=messages)
                 args.query = response.choices[0].message.content
                 print(f"Enhanced query ({args.enhance}): '{old_query}' -> '{args.query}'\n")
-
-            results = hybrid_search.rrf_search(args.query, args.k, args.limit)
-            for id, item in enumerate(results, start=1):
-                title = hybrid_search.semantic_search.document_map[item[0]]['title']
-                description = hybrid_search.semantic_search.document_map[item[0]]['description']
-                print(f"{id}. {title}")
-                print(f"RRF Score: {item[1].get('rrf_score', 0.0):.3f}")
-                print(f"BM25: {item[1].get('bm25_rank', 0.0):.3f}, Semantic: {item[1].get('semantic_rank', 0.0):.3f}")
-                print(description)
+            if args.rerank_method == "individual":
+                limit = args.limit * 5
+                results = hybrid_search.rrf_search(args.query, args.k, limit)
+                for item in results:
+                    doc = hybrid_search.semantic_search.document_map[item[0]]
+                    messages = [
+                        {
+                            "role": "user",
+                            "content": individual(args.query, doc),
+                        }
+                    ]
+                    response = client.chat.completions.create(model="openrouter/free", messages=messages)
+                    score = response.choices[0].message.content
+                    item[1]['rank_score'] = int(score) if score.isdigit() else 0
+                results = sorted(results, key=lambda item:item[1]['rank_score'], reverse=True)
+                for id, item in enumerate(results, start=1):
+                    title = hybrid_search.semantic_search.document_map[item[0]]['title']
+                    description = hybrid_search.semantic_search.document_map[item[0]]['description']
+                    print(f"{id}. {title}")
+                    print(f"Re-rank Score: {item[1].get('rank_score', 0.0):.3f}/10")
+                    print(f"RRF Score: {item[1].get('rrf_score', 0.0):.3f}")
+                    print(f"BM25: {item[1].get('bm25_rank', 0.0):.3f}, Semantic: {item[1].get('semantic_rank', 0.0):.3f}")
+                    print(description)
+            else:
+                results = hybrid_search.rrf_search(args.query, args.k, args.limit)
+                for id, item in enumerate(results, start=1):
+                    title = hybrid_search.semantic_search.document_map[item[0]]['title']
+                    description = hybrid_search.semantic_search.document_map[item[0]]['description']
+                    print(f"{id}. {title}")
+                    print(f"RRF Score: {item[1].get('rrf_score', 0.0):.3f}")
+                    print(f"BM25: {item[1].get('bm25_rank', 0.0):.3f}, Semantic: {item[1].get('semantic_rank', 0.0):.3f}")
+                    print(description)
         case _:
             parser.print_help()
 
