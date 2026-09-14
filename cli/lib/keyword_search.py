@@ -42,13 +42,9 @@ class InvertedIndex:
         return sorted(doc_ids)
 
     def get_tf(self, doc_id, term):
-        tokens = self._tokenizer(term)
-        if len(tokens) != 1:
-            raise ValueError("Term must contain exactly one searchable token")
-        token = tokens[0]
         if doc_id not in self.term_frequencies:
             return 0
-        return self.term_frequencies[doc_id].get(token, 0)
+        return self.term_frequencies[doc_id].get(term, 0)
 
     def build(self):
         movies = load_file("data/movies.json")

@@ -2,6 +2,7 @@ import os
 from collections import defaultdict
 from .keyword_search import InvertedIndex
 from .semantic_search import ChunkedSemanticSearch
+import logging
 
 
 class HybridSearch:
@@ -39,18 +40,26 @@ class HybridSearch:
         return sorted(document_scores.items(), key=lambda item:item[1]['hybrid_score'], reverse=True)
 
     def rrf_search(self, query: str, k: int, limit: int = 10) -> list[dict]:
-        bm25_search = self._bm25_search(query, limit)
-        semantic_search = self.semantic_search.search_chunks(query, limit)
+        logging.debug("RRF search - original query: %s", query)
+        bm25_search = self._bm25_search(query, k)
+        semantic_search = self.semantic_search.search_chunks(query, k)
         document_ranks = defaultdict(dict)
         for rank, item in enumerate(bm25_search, start=1):
             idx = item[0]
             document_ranks[idx]['bm25_rank'] = rank
-            document_ranks[idx]['rrf_score'] = document_ranks[idx].get('rrf_score', 0.0) + rrf_score(rank)
+            document_ranks[idx]['rrf_score'] = document_ranks[idx].get('rrf_score', 0.0) + rrf_score(rank, k)
         for rank, item in enumerate(semantic_search, start=1):
             idx = item['id']
             document_ranks[idx]['semantic_rank'] = rank
-            document_ranks[idx]['rrf_score'] = document_ranks[idx].get('rrf_score', 0.0) + rrf_score(rank)
-        return sorted(document_ranks.items(), key=lambda item:item[1]['rrf_score'], reverse=True)
+            document_ranks[idx]['rrf_score'] = document_ranks[idx].get('rrf_score', 0.0) + rrf_score(rank, k)
+        results = sorted(document_ranks.items(), key=lambda item:item[1]['rrf_score'], reverse=True)[:limit]
+        # Log intermediate RRF results (document id and rrf score)
+        try:
+            debug_list = [(int(idx), vals.get('rrf_score', 0.0)) for idx, vals in results]
+        except Exception:
+            debug_list = [(idx, vals.get('rrf_score', 0.0)) for idx, vals in results]
+        logging.debug("RRF intermediate results (id, rrf_score): %s", debug_list)
+        return results
 
 
 def normilaze(nums):

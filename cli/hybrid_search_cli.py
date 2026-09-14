@@ -8,6 +8,7 @@ import json
 import argparse
 import os
 import time
+import logging
 
 
 load_dotenv()
@@ -19,6 +20,8 @@ client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=api_key,
 )
+
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(levelname)s %(message)s")
 
 
 def main() -> None:
@@ -105,6 +108,7 @@ def main() -> None:
                 print(f"BM25: {item[1].get('bm25_score', 0.0):.3f}, Semantic: {item[1].get('semantic_score', 0.0):.3f}")
                 print(description)
         case 'rrf-search':
+            logging.debug("Original query (CLI): %s", args.query)
             if args.enhance == "spell":
                 old_query = args.query
                 messages = [
@@ -116,6 +120,7 @@ def main() -> None:
                 response = client.chat.completions.create(model="openrouter/free", messages=messages)
                 args.query = response.choices[0].message.content
                 print(f"Enhanced query ({args.enhance}): '{old_query}' -> '{args.query}'\n")
+                logging.debug("Enhanced query (%s): '%s' -> '%s'", args.enhance, old_query, args.query)
             elif args.enhance == "rewrite":
                 old_query = args.query
                 messages = [
@@ -127,6 +132,7 @@ def main() -> None:
                 response = client.chat.completions.create(model="openrouter/free", messages=messages)
                 args.query = response.choices[0].message.content
                 print(f"Enhanced query ({args.enhance}): '{old_query}' -> '{args.query}'\n")
+                logging.debug("Enhanced query (%s): '%s' -> '%s'", args.enhance, old_query, args.query)
             elif args.enhance == "expand":
                 old_query = args.query
                 messages = [
@@ -138,12 +144,14 @@ def main() -> None:
                 response = client.chat.completions.create(model="openrouter/free", messages=messages)
                 args.query = response.choices[0].message.content
                 print(f"Enhanced query ({args.enhance}): '{old_query}' -> '{args.query}'\n")
+                logging.debug("Enhanced query (%s): '%s' -> '%s'", args.enhance, old_query, args.query)
             if args.rerank_method:
                 search_limit = args.limit * 5
             else:
                 search_limit = args.limit
 
             results = hybrid_search.rrf_search(args.query, args.k, search_limit)
+            logging.debug("Results after RRF search (raw): %s", [(r[0], r[1]) for r in results])
 
             if args.rerank_method == "individual":
                 for item in results:
@@ -158,6 +166,7 @@ def main() -> None:
                     score = response.choices[0].message.content
                     item[1]['rank_score'] = int(score) if score.isdigit() else 0
                 results = sorted(results, key=lambda item: item[1].get('rank_score', 0), reverse=True)
+                logging.debug("Final results after individual re-ranking: %s", [(r[0], r[1]) for r in results])
                 for id, item in enumerate(results, start=1):
                     title = hybrid_search.semantic_search.document_map[item[0]]['title']
                     description = hybrid_search.semantic_search.document_map[item[0]]['description']
@@ -194,6 +203,7 @@ def main() -> None:
                     item[1]['llm_rank'] = rank_map.get(doc_id, default_rank)
 
                 results = sorted(results, key=lambda item: item[1].get('llm_rank', default_rank))
+                logging.debug("Final results after batch re-ranking: %s", [(r[0], r[1]) for r in results])
 
                 print(f"Re-ranking top {args.limit} results using batch method...")
                 print(f"Reciprocal Rank Fusion Results for '{args.query}' (k={args.k}):\n")
@@ -227,6 +237,7 @@ def main() -> None:
                     item[1]['cross_encoder_score'] = float(score)
 
                 results = sorted(results, key=lambda item: item[1].get('cross_encoder_score', float('-inf')), reverse=True)
+                logging.debug("Final results after cross_encoder re-ranking: %s", [(r[0], r[1]) for r in results])
 
                 print(f"Re-ranking top {args.limit} results using cross_encoder method...")
                 print(f"Reciprocal Rank Fusion Results for '{args.query}' (k={args.k}):\n")
