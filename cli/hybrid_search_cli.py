@@ -70,6 +70,11 @@ def main() -> None:
         choices=["individual", "batch", "cross_encoder"],
         help="Re-Ranking method",
     )
+    rrf_parser.add_argument(
+        "--evaluate",
+        action="store_true",
+        help="Evaluate the score by an LLM",
+    )
     weighted_parser.add_argument(
         "query", 
         type=str, 
@@ -93,11 +98,13 @@ def main() -> None:
     args = parser.parse_args()
     documents = load_file("data/movies.json")
     hybrid_search = HybridSearch(documents)
+    
     match args.command:
         case 'normalize':
             results = normilaze(args.nums)
             for item in results:
                 print(f"* {item:.4f}")
+                
         case 'weighted-search':
             results = hybrid_search.weighted_search(args.query, args.alpha, args.limit)
             for id, item in enumerate(results, start=1):
@@ -107,6 +114,7 @@ def main() -> None:
                 print(f"Hybrid Score: {item[1].get('hybrid_score', 0.0):.3f}")
                 print(f"BM25: {item[1].get('bm25_score', 0.0):.3f}, Semantic: {item[1].get('semantic_score', 0.0):.3f}")
                 print(description)
+                
         case 'rrf-search':
             logging.debug("Original query (CLI): %s", args.query)
             if args.enhance == "spell":
@@ -145,6 +153,7 @@ def main() -> None:
                 args.query = response.choices[0].message.content
                 print(f"Enhanced query ({args.enhance}): '{old_query}' -> '{args.query}'\n")
                 logging.debug("Enhanced query (%s): '%s' -> '%s'", args.enhance, old_query, args.query)
+                
             if args.rerank_method:
                 search_limit = args.limit * 5
             else:
@@ -259,6 +268,58 @@ def main() -> None:
                     print(f"RRF Score: {item[1].get('rrf_score', 0.0):.3f}")
                     print(f"BM25: {item[1].get('bm25_rank', 0.0):.3f}, Semantic: {item[1].get('semantic_rank', 0.0):.3f}")
                     print(description)
+
+            if args.evaluate:
+                # Target the exact results that were printed
+                if args.rerank_method in ["batch", "cross_encoder"]:
+                    printed_results = results[:args.limit]
+                else:
+                    printed_results = results
+
+                formatted_results = []
+                for item in printed_results:
+                    doc = hybrid_search.semantic_search.document_map[item[0]]
+                    title = doc.get('title', '')
+                    desc = doc.get('description', '')
+                    formatted_results.append(f"{title}: {desc}")
+
+                prompt = f"""Rate how relevant each result is to this query on a 0-3 scale:
+
+Query: "{args.query}"
+
+Results:{chr(10).join(formatted_results)}
+
+Scale:
+- 3: Highly relevant
+- 2: Relevant
+- 1: Marginally relevant
+- 0: Not relevant
+
+Do NOT give any numbers other than 0, 1, 2, or 3.
+
+Return ONLY the scores in the same order you were given the documents. Return a valid JSON list, nothing else. For example:
+
+[2, 0, 3, 2, 0, 1]"""
+
+                messages = [{"role": "user", "content": prompt}]
+                response = client.chat.completions.create(model="openrouter/free", messages=messages)
+                content = response.choices[0].message.content.strip()
+
+                try:
+                    # Strip any possible markdown formatting the free models might sneak in
+                    clean_content = content.replace("```json", "").replace("```", "").strip()
+                    scores = json.loads(clean_content)
+                except Exception as e:
+                    logging.error(f"Failed to parse JSON response: {e}")
+                    scores = []
+
+                # Print out final evaluation report matching the exact format
+                for i, item in enumerate(printed_results, start=1):
+                    doc = hybrid_search.semantic_search.document_map[item[0]]
+                    title = doc.get('title', '')
+                    score = scores[i - 1] if (i - 1) < len(scores) else 0
+                    print(f"{i}. {title}: {score}/3")
+
         case _:
             parser.print_help()
 
