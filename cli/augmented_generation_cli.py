@@ -161,7 +161,6 @@ def main() -> None:
             documents = load_file("data/movies.json")
             search = HybridSearch(documents)
             
-            # Using 60 as k parameter to be consistent with the citations implementation
             results = search.rrf_search(question_query, 60, args.limit)
             
             docs_list = [search.semantic_search.document_map[res[0]] for res in results]
